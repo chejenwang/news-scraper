@@ -4,14 +4,14 @@ import subprocess
 import time
 import sys
 
-# ================= 設定區 (自動偵測環境) =================
-# 取得目前 run_all.py 所在的絕對路徑
+# ================= 設定區 (自動偵測路徑) =================
+# 取得目前這個 run_all.py 所在的絕對目錄
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 爬蟲程式所在的資料夾 (設為與 run_all.py 同一個目錄)
+# 爬蟲程式所在的資料夾 (設為與 run_all.py 相同)
 SCRIPTS_DIR = BASE_DIR 
 
-# 資料儲存路徑：優先接收 GitHub 傳入的參數，若無則在本地建立 data 資料夾
+# 資料儲存路徑：優先使用 GitHub 傳入的參數，若無則在本地建立 data 資料夾
 if len(sys.argv) > 1:
     DATA_OUTPUT_DIR = sys.argv[1]
 else:
@@ -40,19 +40,17 @@ def run_crawlers():
         start_time = time.time()
         
         try:
-            # 關鍵修正：在 GitHub (Linux) 使用 python3，在 Windows 使用 python
+            # 關鍵修正：在 GitHub (Linux) 必須使用 python3 指令
             python_cmd = 'python3' if sys.platform != 'win32' else 'python'
             
-            # 執行爬蟲並傳入儲存路徑參數
+            # 執行爬蟲並傳入路徑參數
             subprocess.run(
                 [python_cmd, file_path, DATA_OUTPUT_DIR], 
                 check=True
             )
-            print(f"✅ {file_name} 成功！(耗時: {time.time() - start_time:.1f}秒)")
-        except subprocess.CalledProcessError:
-            print(f"❌ {file_name} 執行出錯 (回傳非零狀態碼)")
+            print(f"✅ {file_name} 執行成功！")
         except Exception as e:
-            print(f"⚠️ 發生意外錯誤: {e}")
+            print(f"❌ {file_name} 執行失敗: {e}")
 
 if __name__ == "__main__":
     run_crawlers()
