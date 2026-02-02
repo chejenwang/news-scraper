@@ -5,14 +5,16 @@ import time
 import random
 from datetime import datetime
 import pandas as pd
-import re  # <--- 引入正規表示式套件
+import re
 from openpyxl.styles import Font, Alignment
+import sys  # <--- 新增：用於接收參數
+import os   # <--- 新增：用於處理路徑
 
 # ================= 設定區 =================
 LIST_URL = "https://www.cna.com.tw/list/aall.aspx"
 BASE_URL = "https://www.cna.com.tw"
 
-# 檔名
+# 檔名定義
 TODAY_STR_FILENAME = datetime.now().strftime('%Y%m%d')
 JSON_FILENAME = f"cna_news_{TODAY_STR_FILENAME}.json"
 EXCEL_FILENAME = f"cna_news_{TODAY_STR_FILENAME}.xlsx"
@@ -30,7 +32,7 @@ EXCLUDED_KEYWORDS = [
     "/business/", "/information/"
 ]
 
-# 常見地點與結尾詞清單 (用於移除作者後面的地點)
+# 常見地點與結尾詞清單
 LOCATIONS = [
     "台北", "新北", "桃園", "台中", "台南", "高雄", "基隆", "新竹", "嘉義", 
     "苗栗", "彰化", "南投", "雲林", "屏東", "宜蘭", "花蓮", "台東", "澎湖", 
@@ -41,37 +43,19 @@ LOCATIONS = [
 # ================= 核心工具函式 =================
 
 def extract_author(content):
-    """
-    使用正規表示式從內文中精準提取記者姓名
-    範例輸入: （中央社記者鍾榮峰台北19日電）
-    範例輸出: 鍾榮峰
-    """
     if not content:
         return "中央社"
-
-    # 1. 抓取括號內的完整片語 (包含記者、地點、時間)
-    # 支援全形括號（）與半形括號()
     match = re.search(r'[（(]中央社記者(.+?)[）)]', content)
-    
     if match:
-        raw_text = match.group(1).strip() # 抓出：鍾榮峰台北19日電
-        
-        # 2. 移除結尾的 "電", "專電", "特稿"
-        raw_text = re.sub(r'(專?電|特稿)$', '', raw_text) # 變成：鍾榮峰台北19日
-        
-        # 3. 移除日期 (如 "19日", "31日")
-        raw_text = re.sub(r'\d+日', '', raw_text) # 變成：鍾榮峰台北
-        
-        # 4. 移除地點 (從尾端檢查並移除)
-        # 我們不斷檢查字串結尾是否包含地點清單中的詞，有的話就切掉
+        raw_text = match.group(1).strip()
+        raw_text = re.sub(r'(專?電|特稿)$', '', raw_text)
+        raw_text = re.sub(r'\d+日', '', raw_text)
         for loc in LOCATIONS:
             if raw_text.endswith(loc):
-                raw_text = raw_text[:-len(loc)] # 切除地點
-                break # 通常只有一個地點，切完就跳出
-        
+                raw_text = raw_text[:-len(loc)]
+                break
         return raw_text.strip()
-    
-    return "中央社" # 如果找不到格式，回傳預設值
+    return "中央社"
 
 def check_is_today(date_str_from_web):
     try:
@@ -113,7 +97,7 @@ def get_news_links():
 
 def parse_news_content(url):
     print(f"  正在檢查: {url}")
-    time.sleep(random.uniform(1.5, 13.5))
+    time.sleep(random.uniform(1.5, 3.5)) # 稍微縮短測試時間
 
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
@@ -121,8 +105,6 @@ def parse_news_content(url):
             return None, False
 
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 1. 抓取日期
         date_tag = soup.select_one('.updatetime span')
         if not date_tag: return None, False
         full_date_str = date_tag.text.strip()
@@ -132,25 +114,16 @@ def parse_news_content(url):
             return None, False
 
         print(f"    -> 發現今日新聞！日期: {full_date_str}")
-
-        # 2. 標題
         title_tag = soup.select_one('.centralContent h1 span')
         title = title_tag.text.strip() if title_tag else "未知標題"
-
-        # 3. 內文
         content_div = soup.select_one('.paragraph')
         paragraphs = content_div.find_all('p') if content_div else []
         content = "\n".join([p.text.strip() for p in paragraphs if p.text.strip()])
-        
-        # 4. 副標題
         subtitle = None
         strong_tag = content_div.find('strong') if content_div else None
         if strong_tag:
             subtitle = strong_tag.text.strip()
-
-        # 5. --- 使用新的函式提取作者 ---
         author = extract_author(content)
-        print(f"       (作者提取結果: {author})")
 
         news_data = {
             "日期": full_date_str,
@@ -161,9 +134,7 @@ def parse_news_content(url):
             "網址": url,
             "下載時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        
         return news_data, True
-
     except Exception as e:
         print(f"  解析錯誤: {e}")
         return None, False
@@ -183,7 +154,6 @@ def save_optimized_excel(data_list, filename):
     for col_letter, width in column_widths.items():
         worksheet.column_dimensions[col_letter].width = width
 
-    # 超連結處理
     link_col_idx = 6 
     for row in range(2, len(data_list) + 2):
         cell = worksheet.cell(row=row, column=link_col_idx)
@@ -191,7 +161,6 @@ def save_optimized_excel(data_list, filename):
             cell.hyperlink = cell.value
             cell.font = Font(color="0000FF", underline="single")
     
-    # 內文自動換行
     content_col_idx = 5
     for row in range(2, len(data_list) + 2):
         cell = worksheet.cell(row=row, column=content_col_idx)
@@ -200,8 +169,21 @@ def save_optimized_excel(data_list, filename):
     writer.close()
     print(f"Excel 優化完成：{filename}")
 
+# ================= 主程式 =================
+
 def main():
     print(f"系統日期: {datetime.now().strftime('%Y/%m/%d')}")
+    
+    # --- 新增：處理傳入的路徑參數 ---
+    if len(sys.argv) > 1:
+        save_dir = sys.argv[1]
+    else:
+        save_dir = "." # 如果沒給參數，就存在目前資料夾
+
+    # 確保資料夾存在 (以防萬一)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
     links = get_news_links()
     today_news = []
     old_news_count = 0 
@@ -212,21 +194,15 @@ def main():
             break
 
         data, is_today_flag = parse_news_content(url)
-        
         if is_today_flag and data:
             today_news.append(data)
             old_news_count = 0 
         elif not is_today_flag:
             old_news_count += 1
     
-    # --- 修正後的儲存區塊 ---
+    # --- 儲存區塊 ---
     if today_news:
-        if len(sys.argv) > 1:
-            save_dir = sys.argv[1]
-        else:
-            save_dir = "."
-        
-        # 完整的路徑組合
+        # 使用 os.path.join 結合路徑與檔名
         json_full_path = os.path.join(save_dir, JSON_FILENAME)
         excel_full_path = os.path.join(save_dir, EXCEL_FILENAME)
 
@@ -237,5 +213,9 @@ def main():
         # 儲存 Excel
         save_optimized_excel(today_news, excel_full_path)
         print(f"\n全部完成！共 {len(today_news)} 篇。")
+        print(f"檔案儲存於: {save_dir}")
     else:
         print("\n未發現今日新聞。")
+
+if __name__ == '__main__':
+    main()
