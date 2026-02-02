@@ -7,8 +7,8 @@ import pandas as pd
 from datetime import datetime
 from deep_translator import GoogleTranslator
 from openpyxl.styles import Alignment
-import sys  # ### 修改: 加入 sys
-import os   # ### 修改: 加入 os
+import sys  # <--- 新增
+import os   # <--- 新增
 
 # ================= 設定區 =================
 BASE_URL = "https://kyivindependent.com"
@@ -35,120 +35,120 @@ def translate_text(text):
             return translator.translate(text[:4500]) + translator.translate(text[4500:9000])
         return translator.translate(text)
     except Exception as e:
-        print(f"  [翻譯失敗] {e}")
+        print(f"  [翻譯錯誤] {e}")
         return text
 
 def parse_article_content(url):
-    """解析文章內文頁面"""
-    print(f"  └─ 正在讀取內文: {url}")
-    time.sleep(random.uniform(1.5, 3.5)) 
-    
+    """ 解析單篇文章內文與中譯 """
     try:
-        res = requests.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        if response.status_code != 200: return None, None, None, None
         
-        # 1. 抓取日期
-        date_tag = soup.select_one('time')
-        date_str = date_tag.get_text(strip=True) if date_tag else "未知日期"
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 2. 抓取作者
-        author_tag = soup.select_one('a[href*="/author/"]')
-        author = author_tag.get_text(strip=True) if author_tag else "Kyiv Independent Staff"
+        # 抓取日期與作者
+        date_tag = soup.select_one('.article-date, time')
+        date_str = date_tag.text.strip() if date_tag else "未知日期"
         
-        # 3. 抓取正文 (Kyiv Independent 常用的正文容器)
-        content_div = soup.select_one('.article-body') or soup.select_one('.post-content') or soup.select_one('article')
-        if not content_div:
-            # 備用方案：抓取所有段落，過濾掉短句
-            paragraphs = soup.find_all('p')
-            content_en = "\n".join([p.get_text(strip=True) for p in paragraphs if len(p.get_text()) > 50])
-        else:
-            # 去除雜訊
-            for garbage in content_div(["script", "style", "aside", "div.ad-slot", "figure"]):
-                garbage.decompose()
-            content_en = content_div.get_text(separator="\n", strip=True)
+        author_tag = soup.select_one('.article-author, .author-name')
+        author_str = author_tag.text.strip() if author_tag else "Kyiv Independent"
 
-        # --- 翻譯內文 ---
-        content_tw = translate_text(content_en)
+        # 抓取內文
+        content_div = soup.select_one('.article-content, .post-content')
+        if not content_div: return None, None, None, None
         
-        return date_str, author, content_en, content_tw
+        paragraphs = content_div.find_all('p')
+        full_text_en = "\n\n".join([p.text.strip() for p in paragraphs if p.text.strip()])
+        
+        # 翻譯內文
+        print(f"    正在翻譯內文 ({len(full_text_en)} 字)...")
+        full_text_tw = translate_text(full_text_en)
+        
+        return date_str, author_str, full_text_en, full_text_tw
     except Exception as e:
-        print(f"  [內容解析錯誤] {e}")
-        return "", "", "", ""
+        print(f"  [解析文章失敗] {url}: {e}")
+        return None, None, None, None
 
-def save_to_excel_optimized(df, filename):
-    """儲存並優化 Excel 格式"""
-    # filename 若包含完整路徑，pandas 也能處理
-    writer = pd.ExcelWriter(filename, engine='openpyxl')
-    df.to_excel(writer, index=False)
-    worksheet = writer.sheets['Sheet1']
+def save_to_excel_optimized(df, full_output_path):
+    """ 格式化並儲存 Excel """
+    writer = pd.ExcelWriter(full_output_path, engine='openpyxl')
+    df.to_excel(writer, index=False, sheet_name='KyivIndependent')
     
-    column_settings = {
-        'A': 12, 'B': 20, 'C': 15, 'D': 40, 
-        'E': 40, 'F': 60, 'G': 40
-    }
-    for col_letter, width in column_settings.items():
-        worksheet.column_dimensions[col_letter].width = width
+    worksheet = writer.sheets['KyivIndependent']
     
+    # 設定欄寬
+    column_widths = {'A': 12, 'B': 15, 'C': 15, 'D': 40, 'E': 40, 'F': 60, 'G': 40}
+    for col, width in column_widths.items():
+        worksheet.column_dimensions[col].width = width
+    
+    # 內文換行設定
     for row in range(2, len(df) + 2):
-        for col in range(1, 8):
-            worksheet.cell(row=row, column=col).alignment = Alignment(wrap_text=True, vertical='top')
-
+        worksheet.cell(row=row, column=6).alignment = Alignment(wrap_text=True, vertical='top')
+    
     writer.close()
+    print(f"Excel 存檔成功: {full_output_path}")
 
 # ================= 主程式 =================
 
 def main():
-    print(f"【啟動 Kyiv Independent 全功能爬蟲】任務時間: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"=== Kyiv Independent 爬蟲啟動 ===")
     
+    # --- 處理傳入的路徑參數 ---
+    if len(sys.argv) > 1:
+        save_dir = sys.argv[1]
+    else:
+        save_dir = "."
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
     all_final_data = []
-    seen_urls = set() 
+    seen_urls = set()
 
     for section in SECTIONS:
-        section_url = f"{BASE_URL}/tag/{section}/"
-        print(f"\n▶ 正在爬取欄目: {section.upper()} (網址: {section_url})")
+        section_url = f"{BASE_URL}/{section}/"
+        print(f"\n正在讀取欄目: {section.upper()}")
         
         try:
-            res = requests.get(section_url, headers=HEADERS, timeout=15)
-            if res.status_code != 200:
-                print(f"  [跳過] 欄目頁面存取失敗 (Code: {res.status_code})")
-                continue
-                
-            soup = BeautifulSoup(res.text, 'html.parser')
-            links = soup.find_all('a')
+            response = requests.get(section_url, headers=HEADERS, timeout=15)
+            if response.status_code != 200: continue
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # 抓取文章清單 (根據網站結構調整 selector)
+            links = soup.select('.article-title a, .post-title a')
             
             count = 0
-            exclude_keywords = ['/tag/', '/author/', '/category/', '/store/', '/jobs/', '/advertising/', '/membership/', '/privacy/', '/cookie/', '/team/', '/contact/', '/about/']
-
             for link in links:
-                title_en = link.get_text(strip=True)
-                href = link.get('href', '')
+                full_url = link.get('href')
+                if not full_url.startswith('http'):
+                    full_url = BASE_URL + full_url
                 
-                if href and len(title_en) > 20 and href.count('-') >= 3:
-                    if not any(k in href for k in exclude_keywords):
-                        full_url = href if href.startswith('http') else BASE_URL + href
-                        
-                        if full_url in seen_urls:
-                            continue
-                        
-                        print(f"  [{count+1}] 發現標題: {title_en[:35]}...")
-                        
-                        title_tw = translate_text(title_en)
-                        date, author, text_en, text_tw = parse_article_content(full_url)
-                        
-                        if text_tw: 
-                            all_final_data.append({
-                                "欄目": section.upper(),
-                                "日期": date,
-                                "作者": author,
-                                "標題_英文": title_en,
-                                "標題_中文": title_tw,
-                                "內文_中文": text_tw,
-                                "網址": full_url
-                            })
-                            seen_urls.add(full_url)
-                            count += 1
+                if full_url not in seen_urls:
+                    title_en = link.text.strip()
+                    print(f"  發現文章: {title_en[:30]}...")
+                    
+                    # 翻譯標題
+                    title_tw = translate_text(title_en)
+                    
+                    # 抓取內容
+                    date, author, text_en, text_tw = parse_article_content(full_url)
+                    
+                    if text_tw: 
+                        all_final_data.append({
+                            "欄目": section.upper(),
+                            "日期": date,
+                            "作者": author,
+                            "標題_英文": title_en,
+                            "標題_中文": title_tw,
+                            "內文_中文": text_tw,
+                            "網址": full_url,
+                            "下載時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                        seen_urls.add(full_url)
+                        count += 1
                 
-                if count >= 10: break
+                # 測試模式：每個欄目抓 3 篇即可，避免跑太久
+                if count >= 3: break
                     
         except Exception as e:
             print(f"  [欄目錯誤] {section}: {e}")
@@ -157,20 +157,16 @@ def main():
     if all_final_data:
         df = pd.DataFrame(all_final_data)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-        filename = f"KyivIndependent_Report_{timestamp}.xlsx"
+        filename = f"KyivIndependent_{timestamp}.xlsx"
         
-        # ### 修改: 判斷儲存路徑
-        if len(sys.argv) > 1:
-            save_dir = sys.argv[1]
-        else:
-            save_dir = "."
-            
-        full_path = os.path.join(save_dir, filename)
+        # 結合路徑與檔名
+        full_excel_path = os.path.join(save_dir, filename)
         
-        save_to_excel_optimized(df, full_path) # 傳入完整路徑
-        print(f"\n✅ 任務完成！已成功儲存 {len(all_final_data)} 筆新聞至 {full_path}")
+        save_to_excel_optimized(df, full_excel_path)
+        print(f"\n全部任務完成！共抓取 {len(all_final_data)} 篇新聞。")
+        print(f"資料夾位置: {save_dir}")
     else:
-        print("\n❌ 失敗：未抓取到任何資料。請確認網路環境或網址是否可存取。")
+        print("\n未抓取到任何今日新聞。")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
