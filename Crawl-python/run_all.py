@@ -2,69 +2,56 @@ import os
 import glob
 import subprocess
 import time
+import sys
 
-# ================= 設定區 (使用相對路徑) =================
-# 獲取目前 run_all.py 所在的資料夾路徑 (即 Crawl-python 資料夾)
+# ================= 設定區 (GitHub Actions 優化版) =================
+# 取得目前這個 run_all.py 所在的絕對路徑
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 爬蟲程式所在的資料夾 (就是目前這個資料夾)
-SCRIPTS_DIR = BASE_DIR
+# 爬蟲程式所在的資料夾 (假設爬蟲跟 run_all.py 放在一起，或是子資料夾)
+# 如果爬蟲在同一個資料夾，就設為 BASE_DIR
+SCRIPTS_DIR = BASE_DIR 
 
-# 資料要儲存的目標資料夾 (news-scraper/data)
-# .. 代表回上一層，然後進入 data 資料夾
-DATA_OUTPUT_DIR = os.path.abspath(os.path.join(BASE_DIR, '..', 'data'))
+# 資料要儲存的目標資料夾 (使用 sys.argv 接收 GitHub 傳入的路徑，否則預設為 ./data)
+if len(sys.argv) > 1:
+    DATA_OUTPUT_DIR = sys.argv[1]
+else:
+    DATA_OUTPUT_DIR = os.path.join(BASE_DIR, "data")
 
-# 主程式名稱，避免重複執行
 MASTER_SCRIPT_NAME = 'run_all.py' 
-# ==========================================
+# ================================================================
 
 def run_crawlers():
-    # 1. 確保 news-scraper/data 資料夾存在
     if not os.path.exists(DATA_OUTPUT_DIR):
         os.makedirs(DATA_OUTPUT_DIR)
-        print(f"已建立輸出資料夾: {DATA_OUTPUT_DIR}")
+        print(f"✅ 已建立儲存資料夾: {DATA_OUTPUT_DIR}")
 
-    # 2. 抓取 Crawl-python 內所有的 .py 檔案
+    # 搜尋該目錄下所有 .py 檔案
     search_path = os.path.join(SCRIPTS_DIR, "*.py")
     files = glob.glob(search_path)
 
-    print(f"=== 偵測到 {len(files)} 個 Python 檔案，準備依序執行 ===")
-    print(f"輸出儲存路徑: {DATA_OUTPUT_DIR}\n")
+    print(f"🚀 偵測到 {len(files)} 個檔案，準備執行...")
 
     for file_path in files:
         file_name = os.path.basename(file_path)
-
-        # 跳過主程式自己
         if file_name == MASTER_SCRIPT_NAME:
             continue
 
-        print(f"--------------------------------------------------")
-        print(f"正在執行爬蟲: {file_name} ...")
-        
+        print(f"\n--- 正在執行: {file_name} ---")
         start_time = time.time()
         
         try:
-            # 3. 執行爬蟲，並將輸出路徑傳給子程式
-            # 確保子程式 (如 Interfax-Ukraine.py) 會讀取 sys.argv[1] 作為儲存路徑
+            # 關鍵：在 Linux/GitHub 環境下，我們直接調用 python3 執行
+            # 並將目標儲存路徑作為第一個參數傳給爬蟲
             subprocess.run(
-                ['python', file_path, DATA_OUTPUT_DIR], 
-                cwd=SCRIPTS_DIR,
+                ['python3', file_path, DATA_OUTPUT_DIR], 
                 check=True
             )
-            
-            elapsed_time = time.time() - start_time
-            print(f"✅ 執行成功: {file_name} (耗時: {elapsed_time:.2f} 秒)")
-            
+            print(f"✅ {file_name} 執行成功 (耗時: {time.time() - start_time:.1f}s)")
         except subprocess.CalledProcessError as e:
-            print(f"❌ 執行失敗: {file_name} (錯誤代碼: {e.returncode})")
+            print(f"❌ {file_name} 執行失敗。錯誤碼: {e.returncode}")
         except Exception as e:
-            print(f"❌ 發生未預期錯誤: {e}")
+            print(f"⚠️ 發生未知錯誤: {e}")
 
-        # 間隔休息，避免被網站封鎖
-        time.sleep(2)
-
-    print("\n==================================================")
-    print("所有爬蟲任務已執行完畢。")
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_crawlers()
